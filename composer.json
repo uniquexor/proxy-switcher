@@ -1,0 +1,21 @@
+{
+    "name": "unique/proxy-switcher",
+    "description": "Provides proxy switching transport using Guzzle",
+    "type": "library",
+    "version": "1.0.0",
+    "authors": [
+        {
+            "name": "Algirdas Gurevicius",
+            "email": "a.gurevicius@gmail.com"
+        }
+    ],
+    "require": {
+        "php": "^7.4",
+        "guzzlehttp/guzzle": "^7.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "unique\\proxyswitcher\\": "src/"
+        }
+    }
+}
