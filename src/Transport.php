@@ -1,11 +1,16 @@
 <?php
     namespace unique\proxyswitcher;
 
+    use GuzzleHttp\ClientInterface;
+    use GuzzleHttp\Exception\GuzzleException;
+    use GuzzleHttp\Promise\PromiseInterface;
+    use Psr\Http\Message\RequestInterface;
+    use Psr\Http\Message\ResponseInterface;
     use unique\proxyswitcher\events\AfterResponseEvent;
-    use unique\proxyswitcher\events\EventHandlingInterface;
-    use unique\proxyswitcher\events\EventTrait;
-    use unique\proxyswitcher\events\LoggerTrait;
-    use unique\proxyswitcher\events\ObjectFactoryTrait;
+    use unique\proxyswitcher\interfaces\EventHandlingInterface;
+    use unique\proxyswitcher\traits\EventTrait;
+    use unique\proxyswitcher\traits\LoggerTrait;
+    use unique\proxyswitcher\traits\ObjectFactoryTrait;
     use unique\proxyswitcher\events\TooManyRequestsEvent;
     use GuzzleHttp\Client;
     use GuzzleHttp\Exception\ClientException;
@@ -13,13 +18,14 @@
     use GuzzleHttp\Exception\RequestException;
 
     /**
-     * Užklausų vykdymo wrapper'is, kuris pasirūpina, kad užklausos būtų vykdomos per proxy serverius ir kad jie būtų reguliariai keičiami.
+     * Uses proxy switching to perform requests. Can easily be configured to use a single proxy or keep switching proxies after a specified amount of request,
+     * failures, etc. Can also be interchangeably used with {@see \GuzzleHttp\Client}
      *
-     * @package app\components
+     * @package unique\proxyswitcher
      */
-    class Transport implements EventHandlingInterface {
+    class Transport implements EventHandlingInterface, ClientInterface {
 
-        use EventTrait, ObjectFactoryTrait, LoggerTrait;
+        use EventTrait, ObjectFactoryTrait, LoggerTrait { LoggerTrait::setLogger as traitSetLogger; }
 
         const EVENT_AFTER_RESPONSE = 'on_after_response';
         const EVENT_TOO_MANY_REQUESTS = 'on_too_many_requests';
@@ -28,129 +34,175 @@
         const REQUEST_POST = 'POST';
 
         /**
-         * Kiek turi įvykti request'ų, kad būtų padaromas timeout'as.
-         * Tikrasis request'ų kiekis bus išrandomize'intas pagal šiuos parametrus.
+         * After a random amount (in the range of min/max) of requests a timeout will be made.
+         * This can be used to confuse anti-scrape'ing measures.
+         * In order to turn this off, set {@see $sleep_time_min} and {@see $sleep_time_max} to zero.
          */
         public $next_timeout_min = 2000;
         public $next_timeout_max = 5000;
 
         /**
-         * Kiek laiko timeout'inti.
-         * Tikrasis timeout'as bus išrandomize'intas pagal šiuos parametrus.
+         * The amount of seconds to sleep after a timeout has been reached.
+         * The real amount of seconds to sleep will be randomized in this range.
+         * Can be set to zero, if no such timeout needs to be made.
          */
         public $sleep_time_min = 2 * 60;
         public $sleep_time_max = 5 * 60;
 
         /**
-         * Kiek turi įvykti request'ų, kad būtų pakeistas proxy.
-         * Tikrasis request'ų kiekis bus išrandomize'intas pagal šiuos parametrus.
+         * Minimum and maximum requests between a proxy switch.
+         * If both set to null, the proxy will only be switched once it fails.
          */
         public $switch_transport_min = 400;
         public $switch_transport_max = 800;
 
+        /**
+         * Specified how many proxies can be tried during a single request, before giving up and throwing an exception.
+         * This can be used as a safety measure, so that in stead of endlessly going through all the proxies specified, assume that there is something
+         * wrong after this many requests fail. (Like maybe internet connection failure, bad address, etc..)
+         * @var int|null 
+         */
+        public $max_proxies_in_a_row = null;
+
+        /**
+         * Default connection timeout for each request.
+         * Can be overriden by passing options to {@see request()} method.
+         * @var int 
+         */
         public $connect_timeout = 1;
 
-        public $sleep_after_download = 1;
-
         /**
-         * Naudoti Proxy request'ams.
-         * @var bool
-         */
-        public $use_proxy = true;
-
-        /**
-         * Saugo kiek įvyko request'ų nuo paskutiniojo proxio pakeitimo.
+         * Specifies the amount of seconds to wait after each successful request, in order to prevent flooding.
          * @var int
          */
-        private $current_download = 0;
+        public $timeout_after_request = 1;
 
         /**
-         * Saugo kiek turi įvykti request'ų su parinktuoju proxiu, kad jis būtų pakeistas į naują.
+         * Defines if proxies need to be used.
+         * @todo: refactor, currently has little use, it's true when proxy_list is provided, otherwise false.
+         * @var bool
+         */
+        protected $use_proxy = false;
+
+        /**
+         * The amount of requests made after last proxy switch.
+         * @var int
+         */
+        private $current_request = 0;
+
+        /**
+         * A randomized amount of requests to be made before switching proxies.
+         * See {@see $switch_transport_min} and {@see $switch_transport_max} to control this
          * @var int|null
          */
         private $switch_transport_on = null;
 
         /**
-         * Saugo kiek jau yra įvykę request'ų nuo paskutinio timeout'o.
+         * The number of requests completed after the last timeout.
          * @var int
          */
-        private $current_download_timeout = 0;
+        private $current_request_timeout = 0;
 
         /**
-         * Saugo kiek reikia įvykdyti request'ų, kad įvyktų timeout'as.
+         * A randomized amount of requests to be made before making a timeout.
+         * See {@see $next_timeout_min} and {@see $next_timeout_max} to control this
          * @var int
          */
-        private $next_timeout = 0;
+        private $next_timeout_on = 0;
 
+        /**
+         * The amount of requests made since last "429 Too many requests"
+         * @var int
+         */
         protected $requests_from_last_429 = 0;
 
         /**
-         * GuzzleHttp klientas.
+         * GuzzleHttp client.
          * @var Client $client
          */
         protected $client;
 
         /**
-         * Sesijos ID gautas po {@see Transport::reauth()}
+         * A cookie string to use for requests.
          * @var string $cookie
          */
         public $cookie = '';
 
         /**
-         * Statinis instance'as.
+         * Static instance of Transport class.
          * @see Transport::getInstance()
          * @var Transport
          */
         protected static $instance;
 
         /**
-         * @var AbstractProxyList
+         * If specified, object will be used to control proxy switching.
+         * You can pass array only during contruction of the Transport object, for proxy_list object to be constructed automatically.
+         * In this case, array needs to contain a ['class'] key.
+         * @var SingleProxyList|ArrayProxyList|array|null
          */
         public $proxy_list;
 
-        public $debug = false;
-
-        // public $container;
-
-        protected $logger;
-
         /**
          * Transport constructor.
+         * @param array $config - Provides configuration for Transport object construction.
          * @throws \Exception
          */
         public function __construct( $config = [] ) {
 
-            /* $this->container = [];
-            $history = Middleware::history( $this->container );
-            $handler_stack = HandlerStack::create();
-            $handler_stack->push( $history ); */
+            $this->client = new \GuzzleHttp\Client();
 
-            $this->client = new \GuzzleHttp\Client(); // [ 'handler' => $handler_stack ] );
+            if ( isset( $config['proxy_list'] ) ) {
 
-            $this->proxy_list = $this->createObject( $config['proxy_list'] );
-            unset( $config['proxy_list'] );
+                $this->setProxyList( $this->createObject( $config[ 'proxy_list' ] ) );
+                $this->use_proxy = true;
+                unset( $config[ 'proxy_list' ] );
+            } else {
 
-            self::initObject( $this, $config );
+                $this->use_proxy = false;
+            }
 
-            // $this->proxy_list = new ArrayProxyList( require __DIR__ . '/../../config/proxy-list.php' );
-            // $this->proxy_list = new DbProxyList();
-            // $this->proxy_list = new SingleProxyList( 'no88.nordvpn.com:80' );
+            $this->initProperties( $config );
 
-            $this->switch_transport_on = rand( $this->switch_transport_min, $this->switch_transport_max );
-            $this->next_timeout = rand( $this->next_timeout_min, $this->next_timeout_max );
+            $this->switch_transport_on = $this->getNewSwitchTransportOn();
+            $this->next_timeout_on = $this->getNewNextTimeoutOn();
         }
 
         /**
-         * Priskiria pateiktąjį objektą, kaip ProxyList'ą.
-         * @param AbstractProxyList $proxy_list
+         * Returns the number of requests that need to happen, before the next switch of proxy.
+         * @return int|null
+         */
+        protected function getNewSwitchTransportOn() {
+
+            if ( $this->switch_transport_min !== null && $this->switch_transport_max !== null ) {
+
+                return rand( $this->switch_transport_min, $this->switch_transport_max );
+            }
+
+            return null;
+        }
+
+        /**
+         * Returns the number of requests that needs to happen before the next timeout.
+         * @return int
+         */
+        protected function getNewNextTimeoutOn() {
+
+            return rand( $this->next_timeout_min, $this->next_timeout_max );
+        }
+
+        /**
+         * Sets the provided proxy list.
+         * @param SingleProxyList|ArrayProxyList|AbstractProxyList $proxy_list
          */
         public function setProxyList( AbstractProxyList $proxy_list ) {
 
             $this->proxy_list = $proxy_list;
+            $this->use_proxy = true;
         }
 
         /**
-         * Gražina ProxyList objektą.
+         * Returns the assigned proxy list object.
          * @return AbstractProxyList
          */
         public function getProxyList() {
@@ -159,83 +211,34 @@
         }
 
         /**
-         * Pakeičia naudojamą Proxy į sekantį.
-         * @throws \Exception
-         */
-        public function switchTransport() {
-
-            $this->proxy_list->switchTransport();
-
-            $this->current_download = 0;
-            $this->switch_transport_on = rand( $this->switch_transport_min, $this->switch_transport_max );
-        }
-
-        /**
-         * Gražina Cookie string'ą (paimtas iš Google Earth užklausų).
-         * Prasmė nelabai aiški, bet be jo neveikia.
-         * Tuo pačiu paduoda ir Session ID, gautą auth metu.
-         * @return string
-         */
-        protected function getCookie() {
-
-            return $this->cookie;
-        }
-
-        /**
-         * GET užklausa.
+         * Checks if the transport needs to be switched or if a timeout needs to be performed and does accordingly.
+         * Afterwards, performs the request.
          *
-         * Jeigu reikia (t.y. su šiuo proxiu įvyko daugiau užklausų nei Transport::$switch_transport_on), pakeičia transport'ą.
-         * Jeigu reikia (t.y. įvyko daugiau užklausų nei Transport::$next_timeout), suspend'ina script'ą iki 10 min.
-         *
-         * @param string $url
-         * @param array $options - žr {@see \GuzzleHttp\Client::get()}
-         * @return \Psr\Http\Message\ResponseInterface
-         * @throws \Exception
+         * @param string $url - URL
+         * @param string $method - GET/POST method
+         * @param array $options - Options to be provided to {@see \GuzzleHttp\Client::request()}
+         * @return ResponseInterface
+         * @throws GuzzleException
          */
-        protected function get( $url, $options = [] ) {
-
-            return $this->client->get(
-                $url,
-                $options
-            );
-        }
-
-        /**
-         * POST užklausa.
-         *
-         * @param string $url
-         * @param array $options - žr {@see \GuzzleHttp\Client::post()}
-         * @return \Psr\Http\Message\ResponseInterface
-         */
-        protected function post( $url, $options = [] ) {
-
-            return $this->client->post(
-                $url,
-                $options
-            );
-        }
-
         protected function doRequest( $url, $method = self::REQUEST_GET, $options = [] ) {
 
             $opt = $options;
 
-            $this->requests_from_last_429++;
-            $this->current_download++;
-            $this->current_download_timeout++;
+            if ( $this->use_proxy && $this->switch_transport_on !== null && $this->current_request >= $this->switch_transport_on ) {
 
-            if ( $this->current_download >= $this->switch_transport_on ) {
-
-                $this->switchTransport();
+                $this->proxy_list->switchTransport();
+                $this->current_request = 0;
+                $this->switch_transport_on = $this->getNewSwitchTransportOn();
             }
 
-            if ( $this->current_download_timeout >= $this->next_timeout ) {
+            if ( $this->current_request_timeout >= $this->next_timeout_on ) {
 
                 $time = rand( $this->sleep_time_min, $this->sleep_time_max );
-                echo 'Timing out for: ' . $time . ' seconds... ';
+                $this->log( 'Timing out for: ' . $time . ' seconds... ' );
                 sleep( $time );
-                echo 'Done.' . "\r\n";
-                $this->current_download_timeout = 0;
-                $this->next_timeout = rand( $this->next_timeout_min, $this->next_timeout_max );
+                $this->log( 'Done.' . "\r\n" );
+                $this->current_request_timeout = 0;
+                $this->next_timeout_on = $this->getNewNextTimeoutOn();
             }
 
             if ( isset( $opt['_connect_timeout'] ) ) {
@@ -247,7 +250,7 @@
                 $opt[ 'connect_timeout' ] = $this->connect_timeout;
             }
 
-            $opt['headers']['Cookie'] = $this->getCookie();
+            $opt['headers']['Cookie'] = $this->cookie;
 
             if ( $this->use_proxy ) {
 
@@ -256,16 +259,37 @@
 
             if ( $method === self::REQUEST_GET ) {
 
-                return $this->get( $url, $opt );
+                return $this->client->get(
+                    $url,
+                    $opt
+                );
             } else {
 
-                return $this->post( $url, $opt );
+                return $this->client->post(
+                    $url,
+                    $opt
+                );
             }
         }
 
-        public function request( $url, $method = self::REQUEST_GET, $options = [], $max_proxies_in_a_row = null ) {
+        /**
+         * Makes a request to the url, using the provided request method GET/POST.
+         * If a `proxy_list` object was provided during the construction of the object or using {@see setProxyList()} method, proxy switching logic will be
+         * applied accordingly.
+         *
+         * @param string $method - GET or POST
+         * @param \Psr\Http\Message\UriInterface|string $url - URL
+         * @param array $options - Options to be provided to either {@see Client::get()} or {@see Client::post()}
+         * @return ResponseInterface
+         * @throws GuzzleException|\Throwable
+         */
+        public function request( string $method, $url, array $options = [] ): ResponseInterface {
 
             $count = 0;
+
+            $this->requests_from_last_429++;
+            $this->current_request++;
+            $this->current_request_timeout++;
 
             do {
 
@@ -278,23 +302,24 @@
                     $this->trigger( self::EVENT_AFTER_RESPONSE, $event );
                 } catch ( ConnectException $exception ) {
 
-                    if ( !$this->use_proxy || ( ( $max_proxies_in_a_row !== null ) && ( ++$count > $max_proxies_in_a_row ) ) ) {
+                    if ( !$this->use_proxy || ( ( $this->max_proxies_in_a_row !== null ) && ( $count >= $this->max_proxies_in_a_row ) ) ) {
 
                         throw $exception;
                     }
 
                     if ( strpos( $exception->getMessage(), 'with 0 out of 0 bytes received' ) !== false && !isset( $options['_connect_timeout'] ) ) {
 
-                        // pastebėjau, kad šitą klaidą meta, kai neužtenka timeout'o gauti response'ui, tad pailginam jį ir nefail'inam transport'o
+                        // I've noticed that sometimes, after having received this error, you can extend a connection timeout and it will work, so we try that,
+                        // before failing
                         $options['_connect_timeout'] = $this->connect_timeout + 5;
-                        // $this->log( 'Retrying with longer timeout...' . "\r\n" );
                     } else {
 
                         unset( $options['_connect_timeout'] );
-                        $this->log( $exception->getCode() . ': ' . $exception->getMessage() . "\r\n" );
+                        $this->log( $exception->getCode() . ': ' . $exception->getMessage() . "\r\n", true );
                         $this->proxy_list->markFailed( $exception );
+                        $count++;
                     }
-                } catch ( ClientException | TooManyRequestsException $exception ) {
+                } catch ( ClientException $exception ) {
 
                     unset( $options['_connect_timeout'] );
                     if ( $exception->getCode() == 429 ) {
@@ -303,7 +328,7 @@
                         $evt->transport = $this;
                         $this->trigger( self::EVENT_TOO_MANY_REQUESTS, $evt );
 
-                        $this->log( '429 Too Many Requests (' . $this->requests_from_last_429 . ' since last 429)' . "\r\n" );
+                        $this->log( '429 Too Many Requests (' . $this->requests_from_last_429 . ' since last 429)' . "\r\n", true );
                         $this->requests_from_last_429 = 0;
 
                         if ( !$evt->getHandled() ) {
@@ -317,12 +342,14 @@
                 } catch ( RequestException $exception ) {
 
                     unset( $options['_connect_timeout'] );
-                    $this->log( $exception->getCode() . ': ' . $exception->getMessage() . "\r\n" );
+                    $this->log( $exception->getCode() . ': ' . $exception->getMessage() . "\r\n", true );
 
-                    if ( strpos( $exception->getMessage(), 'Received HTTP code 407 from proxy after CONNECT' ) !== false
-                        && $this->use_proxy
-                        && ( ( $max_proxies_in_a_row === null ) || ( ++$count <= $max_proxies_in_a_row ) )
-                    ) {
+                    if ( !$this->use_proxy || ( $this->max_proxies_in_a_row !== null && $count >= $this->max_proxies_in_a_row ) ) {
+
+                        throw $exception;
+                    }
+
+                    if ( strpos( $exception->getMessage(), 'Received HTTP code 407 from proxy after CONNECT' ) !== false ) {
 
                         $this->proxy_list->markFailed( $exception );
                     } elseif ( strpos( $exception->getMessage(), 'Could not resolve proxy' ) !== false ) {
@@ -332,22 +359,27 @@
 
                         throw $exception;
                     }
-                }
 
+                    $count++;
+                }
             } while ( $event->response === null );
 
-            $this->proxy_list->markSuccess();
-            if ( $this->sleep_after_download ) {
+            if ( $this->use_proxy ) {
+                
+                $this->proxy_list->markSuccess();
+            }
+            
+            if ( $this->timeout_after_request ) {
 
-                sleep( $this->sleep_after_download );
+                sleep( $this->timeout_after_request );
             }
 
             return $event->response;
         }
 
         /**
-         * Returns static instance of the Transport.
-         * @param array $config - Public attribute of the Transport class values.
+         * Returns a static instance of the Transport class.
+         * @param array $config - public attributes of the Transport class object. Will only be set the first time it's called.
          * @return static
          * @throws \Exception
          */
@@ -359,5 +391,48 @@
             }
 
             return self::$instance;
+        }
+
+        /**
+         * Sets a logger function for transport and proxy_list.
+         * A logger function will receive a single string parameter with a text that needs logging.
+         * @param \Closure $logger
+         */
+        public function setLogger( \Closure $logger ) {
+
+            $this->proxy_list->setLogger( $logger );
+            $this->traitSetLogger( $logger );
+        }
+
+        /**
+         * @inheritdoc
+         */
+        public function send( RequestInterface $request, array $options = [] ): ResponseInterface {
+
+            throw new \Exception( 'Not Implemented.' );
+        }
+
+        /**
+         * @inheritdoc
+         */
+        public function sendAsync( RequestInterface $request, array $options = [] ): PromiseInterface {
+
+            throw new \Exception( 'Not Implemented.' );
+        }
+
+        /**
+         * @inheritdoc
+         */
+        public function requestAsync( string $method, $uri, array $options = [] ): PromiseInterface {
+
+            throw new \Exception( 'Not Implemented.' );
+        }
+
+        /**
+         * @inheritdoc
+         */
+        public function getConfig( ?string $option = null ) {
+
+            throw new \Exception( 'Not Implemented.' );
         }
     }
