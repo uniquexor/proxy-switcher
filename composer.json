@@ -2,7 +2,7 @@
     "name": "unique/proxy-switcher",
     "description": "Provides proxy switching transport using Guzzle",
     "type": "library",
-    "version": "1.0.1",
+    "license": "MIT",
     "authors": [
         {
             "name": "Algirdas Gurevicius",
