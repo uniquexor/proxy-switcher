@@ -1,9 +1,9 @@
 <?php
     namespace unique\proxyswitcher\events;
 
-    use unique\proxyswitcher\traits\EventObjectTrait;
+    use unique\events\interfaces\EventObjectInterface;
+    use unique\events\traits\EventObjectTrait;
     use unique\proxyswitcher\Transport;
-    use unique\proxyswitcher\interfaces\EventObjectInterface;
 
     /**
      * Class TooManyRequestsEvent.

@@ -15,7 +15,8 @@
     },
     "require-dev": {
         "phpunit/phpunit": "^9.4",
-        "lstrojny/phpunit-function-mocker": "*"
+        "lstrojny/phpunit-function-mocker": "*",
+        "unique/events": "^1.0.0"
     },
     "autoload": {
         "psr-4": {

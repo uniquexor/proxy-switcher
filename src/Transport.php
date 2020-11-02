@@ -6,9 +6,9 @@
     use GuzzleHttp\Promise\PromiseInterface;
     use Psr\Http\Message\RequestInterface;
     use Psr\Http\Message\ResponseInterface;
+    use unique\events\interfaces\EventHandlingInterface;
+    use unique\events\traits\EventTrait;
     use unique\proxyswitcher\events\AfterResponseEvent;
-    use unique\proxyswitcher\interfaces\EventHandlingInterface;
-    use unique\proxyswitcher\traits\EventTrait;
     use unique\proxyswitcher\traits\LoggerTrait;
     use unique\proxyswitcher\traits\ObjectFactoryTrait;
     use unique\proxyswitcher\events\TooManyRequestsEvent;

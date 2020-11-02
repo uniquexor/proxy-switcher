@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "176012e786460a1aeb7b9adde5242db5",
+    "content-hash": "730a4fdfb765075da2e86c5a67d53107",
     "packages": [
         {
             "name": "guzzlehttp/guzzle",
@@ -2469,6 +2469,50 @@
                 }
             ],
             "time": "2020-07-12T23:59:07+00:00"
+        },
+        {
+            "name": "unique/events",
+            "version": "1.0.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/uniquexor/events.git",
+                "reference": "f8802c775ecc9b822437b856eb66fb229996aeee"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/uniquexor/events/zipball/f8802c775ecc9b822437b856eb66fb229996aeee",
+                "reference": "f8802c775ecc9b822437b856eb66fb229996aeee",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=7.4"
+            },
+            "require-dev": {
+                "phpunit/phpunit": "^9.4"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "unique\\events\\": "src/",
+                    "unique\\eventsunit\\": "tests/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Algirdas Gurevičius",
+                    "email": "a.gurevicius@gmail.com"
+                }
+            ],
+            "description": "Provides basic event functionality.",
+            "support": {
+                "issues": "https://github.com/uniquexor/events/issues",
+                "source": "https://github.com/uniquexor/events/tree/1.0.0"
+            },
+            "time": "2020-11-02T08:22:35+00:00"
         },
         {
             "name": "webmozart/assert",

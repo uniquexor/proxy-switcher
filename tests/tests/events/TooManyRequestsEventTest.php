@@ -2,8 +2,8 @@
     namespace unique\proxyswitcherunit\tests\events;
 
     use PHPUnit\Framework\TestCase;
+    use unique\events\interfaces\EventObjectInterface;
     use unique\proxyswitcher\events\TooManyRequestsEvent;
-    use unique\proxyswitcher\interfaces\EventObjectInterface;
 
     class TooManyRequestsEventTest extends TestCase {
 

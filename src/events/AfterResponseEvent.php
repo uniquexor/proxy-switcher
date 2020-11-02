@@ -2,8 +2,8 @@
     namespace unique\proxyswitcher\events;
 
     use Psr\Http\Message\ResponseInterface;
-    use unique\proxyswitcher\interfaces\EventObjectInterface;
-    use unique\proxyswitcher\traits\EventObjectTrait;
+    use unique\events\interfaces\EventObjectInterface;
+    use unique\events\traits\EventObjectTrait;
 
     /**
      * Class AfterResponseEvent.

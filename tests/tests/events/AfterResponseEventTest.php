@@ -2,8 +2,8 @@
     namespace unique\proxyswitcherunit\tests\events;
 
     use PHPUnit\Framework\TestCase;
+    use unique\events\interfaces\EventObjectInterface;
     use unique\proxyswitcher\events\AfterResponseEvent;
-    use unique\proxyswitcher\interfaces\EventObjectInterface;
 
     class AfterResponseEventTest extends TestCase {
 
@@ -13,7 +13,6 @@
         public function testProperties() {
 
             $this->assertClassHasAttribute( 'response', AfterResponseEvent::class );
-            $this->assertClassHasAttribute( 'error', AfterResponseEvent::class );
 
             $obj = new AfterResponseEvent();
             $this->assertInstanceOf( EventObjectInterface::class, $obj );
