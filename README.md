@@ -53,6 +53,37 @@ When you are using `ArrayProxyList`, you can use `Transport::$switch_transport_m
 
 You can also specify `Transport::$next_timeout_min` and `Transport::$next_timeout_max` to randomize a number of requests after which a timeout will be made. The length of timeout can be specified by using `Transport::$sleep_time_min` and `Transport::$sleep_time_max` which sets a minimum and maximum of seconds to timeout.
 
+### Passing arguments to GuzzleHttp or chossing another Client
+Although the component has been designed to use GuzzleHttp\Client class for making requests,
+in theory you could choose to use any object that implements request() method. You can do
+this by passing `client_options` attribute to the Transport constructor:
+
+```php
+    new \unique\proxyswitcher\Transport( [
+        'client_options' => [
+            'class' => \My\Client\Class::class,
+        ],  
+    ] );
+```
+
+You can also pass other attributes to the constructor of the client:
+```php
+    new \unique\proxyswitcher\Transport( [
+        'client_options' => [
+            'class' => \GuzzleHttp\Client::class,
+            'verify' => false
+        ],  
+    ] );
+```
+
+If no `class` attribute will be specified `\GuzzleHttp\Client` will be used by default.  
+You could event pass a Client object instead of it's configuration:
+```php
+    $client = new \GuzzleHttp\Client( [ 'verify' => false ] );
+    new \unique\proxyswitcher\Transport( [
+        'client_options' => $client,  
+    ] );
+```
 
 ### Making requests
 Under the hood the component uses GuzzleHttp for making requests, so you can pass any options that you normally would as a third parameter.

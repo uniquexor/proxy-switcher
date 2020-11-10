@@ -150,7 +150,13 @@
          */
         public function __construct( $config = [] ) {
 
-            $this->client = new \GuzzleHttp\Client();
+            if ( !isset( $config['client_options'] ) || ( !is_object( $config['client_options'] ) && !isset( $config['client_options']['class'] ) ) ) {
+
+                $config['client_options']['class'] = Client::class;
+            }
+
+            $this->client = $this->createObject( $config['client_options'] );
+            unset( $config['client_options'] );
 
             if ( isset( $config['proxy_list'] ) ) {
 
@@ -400,8 +406,11 @@
          */
         public function setLogger( \Closure $logger ) {
 
-            $this->proxy_list->setLogger( $logger );
             $this->traitSetLogger( $logger );
+            if ( $this->use_proxy ) {
+
+                $this->proxy_list->setLogger( $logger );
+            }
         }
 
         /**

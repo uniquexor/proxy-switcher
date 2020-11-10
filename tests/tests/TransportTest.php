@@ -86,6 +86,27 @@
             $this->assertFalse( $mock->getUseProxy() );
         }
 
+        public function testConstructorClientOptions() {
+
+            $client = new Client();
+
+            $mock = $this->createPartialMock( Transport::class, [ 'createObject' ] );
+            $mock
+                ->expects( $this->exactly( 4 ) )
+                ->method( 'createObject' )
+                ->withConsecutive(
+                    [ [ 'class' => Client::class ] ],
+                    [ [ 'class' => Client::class, 'verify' => false ] ],
+                    [ [ 'class' => \stdClass::class, 'verify' => false ] ],
+                    [ $client ]
+                );
+
+            $mock->__construct();
+            $mock->__construct( [ 'client_options' => [ 'verify' => false ] ] );
+            $mock->__construct( [ 'client_options' => [ 'class' => \stdClass::class, 'verify' => false ] ] );
+            $mock->__construct( [ 'client_options' => $client ] );
+        }
+
         /**
          * @runInSeparateProcess
          */
