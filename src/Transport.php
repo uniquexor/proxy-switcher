@@ -240,9 +240,14 @@
             if ( $this->current_request_timeout >= $this->next_timeout_on ) {
 
                 $time = rand( $this->sleep_time_min, $this->sleep_time_max );
-                $this->log( 'Timing out for: ' . $time . ' seconds... ' );
-                sleep( $time );
-                $this->log( 'Done.' . "\r\n" );
+
+                if ( $time > 0 ) {
+
+                    $this->log( 'Timing out for: ' . $time . ' seconds... ' );
+                    sleep( $time );
+                    $this->log( 'Done.' . "\r\n" );
+                }
+
                 $this->current_request_timeout = 0;
                 $this->next_timeout_on = $this->getNewNextTimeoutOn();
             }
