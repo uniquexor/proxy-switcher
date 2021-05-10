@@ -117,6 +117,15 @@
         protected $requests_from_last_429 = 0;
 
         /**
+         * Retry connecting with a longer connect_timeout, if a ConnectException is thrown while attempting to do a request with one of the
+         * following messages:
+         * cURL error 28: Connection timed out after 1001 milliseconds
+         * Operation timed out after <...> milliseconds with 0 out of 0 bytes received
+         * @var bool
+         */
+        public $retry_on_connection_errors = true;
+
+        /**
          * GuzzleHttp client.
          * @var Client $client
          */
@@ -124,9 +133,9 @@
 
         /**
          * A cookie string to use for requests.
-         * @var string $cookie
+         * @var false|string $cookie
          */
-        public $cookie = '';
+        public $cookie = false;
 
         /**
          * Static instance of Transport class.
@@ -261,26 +270,21 @@
                 $opt[ 'connect_timeout' ] = $this->connect_timeout;
             }
 
-            $opt['headers']['Cookie'] = $this->cookie;
+            if ( $this->cookie !== false ) {
+
+                $opt[ 'headers' ][ 'Cookie' ] = $this->cookie;
+            }
 
             if ( $this->use_proxy ) {
 
                 $opt[ 'proxy' ] = $this->proxy_list->getCurrentAddress();
             }
 
-            if ( $method === self::REQUEST_GET ) {
-
-                return $this->client->get(
-                    $url,
-                    $opt
-                );
-            } else {
-
-                return $this->client->post(
-                    $url,
-                    $opt
-                );
-            }
+            return $this->client->request(
+                $method,
+                $url,
+                $opt
+            );
         }
 
         /**
@@ -313,23 +317,29 @@
                     $this->trigger( self::EVENT_AFTER_RESPONSE, $event );
                 } catch ( ConnectException $exception ) {
 
+                    if ( $this->retry_on_connection_errors ) {
+
+                        if ( ( strpos( $exception->getMessage(), 'with 0 out of 0 bytes received' ) !== false
+                            || strpos( $exception->getMessage(), 'Connection timed out after ' ) !== false )
+                            && !isset( $options[ '_connect_timeout' ] )
+                        ) {
+
+                            // I've noticed that sometimes, after having received this error, you can extend a connection timeout and it will work, so we try that,
+                            // before failing
+                            $options[ '_connect_timeout' ] = $this->connect_timeout + 5;
+                            continue;
+                        }
+                    }
+
                     if ( !$this->use_proxy || ( ( $this->max_proxies_in_a_row !== null ) && ( $count >= $this->max_proxies_in_a_row ) ) ) {
 
                         throw $exception;
                     }
 
-                    if ( strpos( $exception->getMessage(), 'with 0 out of 0 bytes received' ) !== false && !isset( $options['_connect_timeout'] ) ) {
-
-                        // I've noticed that sometimes, after having received this error, you can extend a connection timeout and it will work, so we try that,
-                        // before failing
-                        $options['_connect_timeout'] = $this->connect_timeout + 5;
-                    } else {
-
-                        unset( $options['_connect_timeout'] );
-                        $this->log( $exception->getCode() . ': ' . $exception->getMessage() . "\r\n", true );
-                        $this->proxy_list->markFailed( $exception );
-                        $count++;
-                    }
+                    unset( $options['_connect_timeout'] );
+                    $this->log( $exception->getCode() . ': ' . $exception->getMessage() . "\r\n", true );
+                    $this->proxy_list->markFailed( $exception );
+                    $count++;
                 } catch ( ClientException $exception ) {
 
                     unset( $options['_connect_timeout'] );

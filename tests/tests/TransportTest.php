@@ -261,6 +261,70 @@
         /**
          * @covers \unique\proxyswitcher\Transport::request
          */
+        public function testRequestConnectExceptionNoProxyListTimeOutErrorWithoutRetry() {
+
+            // No proxy list must forward the exception:
+            $transport = $this->getMockBuilder( Transport::class )
+                ->setMethods( [ 'doRequest' ] )
+                ->getMock();
+
+            $transport->retry_on_connection_errors = false;
+
+            $expected_exception = new ConnectException( 'Connection timed out after 1001 milliseconds', $this->createMock( Request::class ) );
+            $transport
+                ->expects( $this->once() )
+                ->method( 'doRequest' )
+                ->willThrowException( $expected_exception );
+
+            $exception = null;
+
+            /**
+             * @var Transport|MockObject $transport
+             */
+
+            try {
+
+                $transport->request( Transport::REQUEST_GET, 'url' );
+            } catch ( \Exception $exception ) {}
+
+            $this->assertSame( $expected_exception, $exception );
+        }
+
+        /**
+         * @covers \unique\proxyswitcher\Transport::request
+         */
+        public function testRequestConnectExceptionNoProxyListTimeOutErrorWithRetry() {
+
+            // No proxy list must forward the exception:
+            $transport = $this->getMockBuilder( Transport::class )
+                ->setMethods( [ 'doRequest' ] )
+                ->getMock();
+
+            $transport->retry_on_connection_errors = true;
+
+            $expected_exception = new ConnectException( 'Connection timed out after 1001 milliseconds', $this->createMock( Request::class ) );
+            $transport
+                ->expects( $this->exactly( 2 ) )
+                ->method( 'doRequest' )
+                ->willThrowException( $expected_exception );
+
+            $exception = null;
+
+            /**
+             * @var Transport|MockObject $transport
+             */
+
+            try {
+
+                $transport->request( Transport::REQUEST_GET, 'url' );
+            } catch ( \Exception $exception ) {}
+
+            $this->assertSame( $expected_exception, $exception );
+        }
+
+        /**
+         * @covers \unique\proxyswitcher\Transport::request
+         */
         public function testRequestConnectExceptionNoProxyList() {
 
             // No proxy list must forward the exception:
@@ -663,7 +727,7 @@
          */
         public function testRequestSwitchTransportOn() {
 
-            $client = $this->createConfiguredMock( Client::class, [ 'get' => $this->createMock( Response::class ) ] );
+            $client = $this->createConfiguredMock( Client::class, [ 'request' => $this->createMock( Response::class ) ] );
 
             $transport = $this->createPartialMock( Transport::class, [ 'getNewSwitchTransportOn' ] );
             $transport
@@ -718,7 +782,7 @@
          */
         public function testRequestTimeout() {
 
-            $client = $this->createConfiguredMock( Client::class, [ 'get' => $this->createMock( Response::class ) ] );
+            $client = $this->createConfiguredMock( Client::class, [ 'request' => $this->createMock( Response::class ) ] );
 
             $transport = $this->createPartialMock( Transport::class, [ 'getNewSwitchTransportOn', 'getNewNextTimeoutOn', 'log' ] );
             $transport
@@ -762,24 +826,30 @@
 
             $client = $this->createMock( Client::class );
             $client
-                ->expects( $this->exactly( 3 ) )
-                ->method( 'get' )
+                ->expects( $this->exactly( 4 ) )
+                ->method( 'request' )
                 ->withConsecutive(
-                    [ 'url', [ 'connect_timeout' => 1, 'headers' => [ 'Cookie' => '' ] ] ],
-                    [ 'url', [ 'connect_timeout' => 5,  'headers' => [ 'Cookie' => '123' ] ] ],
-                    [ 'url', [ 'connect_timeout' => 10, 'headers' => [ 'Cookie' => '123' ], 'proxy' => 'test' ] ],
+                    [ 'GET', 'url', [ 'connect_timeout' => 1, 'headers' => [ 'Cookie' => '' ] ] ],
+                    [ 'GET', 'url', [ 'connect_timeout' => 5,  'headers' => [ 'Cookie' => '123' ] ] ],
+                    [ 'GET', 'url', [ 'connect_timeout' => 5 ] ],
+                    [ 'GET', 'url', [ 'connect_timeout' => 10, 'headers' => [ 'Cookie' => '123' ], 'proxy' => 'test' ] ],
                 )
                 ->willReturn( $this->createMock( Response::class ) );
 
             $transport = new Transport();
             $transport->setClient( $client );
             $transport->connect_timeout = 1;
+            $transport->cookie = '';
 
             $transport->request( Transport::REQUEST_GET, 'url' );
 
             $transport->cookie = '123';
             $transport->request( Transport::REQUEST_GET, 'url', [ '_connect_timeout' => 5 ] );
 
+            $transport->cookie = false;
+            $transport->request( Transport::REQUEST_GET, 'url', [ '_connect_timeout' => 5 ] );
+
+            $transport->cookie = '123';
             $proxy_list = $this->createMock( ArrayProxyList::class );
             $proxy_list
                 ->expects( $this->once() )
@@ -799,16 +869,13 @@
             $post_response = $this->createMock( Response::class );
 
             $client
-                ->expects( $this->once() )
-                ->method( 'get' )
-                ->with( 'url1', [ 'connect_timeout' => 1, 'headers' => [ 'Cookie' => '' ] ] )
-                ->willReturn( $get_response );
-
-            $client
-                ->expects( $this->once() )
-                ->method( 'post' )
-                ->with( 'url2', [ 'connect_timeout' => 1, 'headers' => [ 'Cookie' => '' ] ] )
-                ->willReturn( $post_response );
+                ->expects( $this->exactly( 2 ) )
+                ->method( 'request' )
+                ->withConsecutive(
+                    [ 'GET', 'url1', [ 'connect_timeout' => 1 ] ],
+                    [ 'POST', 'url2', [ 'connect_timeout' => 1 ] ],
+                )
+                ->willReturnOnConsecutiveCalls( $get_response, $post_response );
 
             $transport = new Transport();
             $transport->setClient( $client );
